@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Immutable;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Queuete
@@ -10,6 +11,7 @@ namespace Queuete
         public QueueItemType Type { get; }
         public QueueItemState State { get; set; } = QueueItemState.Waiting;
         public Exception Error { get; private set; }
+        public CancellationToken CancellationToken => processor.cancellationToken.Token;
 
         internal QueueProcessor processor;
 

@@ -57,5 +57,24 @@ namespace Queuete.Tests
             Assert.AreEqual(QueueItemState.Errored, queueItem.State);
             Assert.AreEqual("foo", queueItem.Error.Message);
         }
+
+        [Test]
+        public async Task Stop()
+        {
+            var executed = false;
+            var queueItem = new QueueItem(testItemType, async x =>
+            {
+                await Task.Delay(int.MaxValue, x.CancellationToken);
+                executed = true;
+            });
+
+            var processor = new QueueProcessor();
+            processor.Start();
+            processor.Enqueue(queueItem);
+            await Task.Delay(10);
+            await processor.Stop();
+
+            Assert.IsFalse(executed);
+        }
     }
 }

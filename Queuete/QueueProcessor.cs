@@ -11,10 +11,11 @@ namespace Queuete
         private readonly object locker = new object();
         private readonly AutoResetEvent waiter = new AutoResetEvent(false);
 
+        internal CancellationTokenSource cancellationToken = new CancellationTokenSource();
+
         private TaskCompletionSource<object> stopped;
         private TaskCompletionSource<object> idled;
         private ImmutableQueue<QueueItem> queue = ImmutableQueue<QueueItem>.Empty;
-        private CancellationTokenSource cancellationToken = new CancellationTokenSource();
 
         public void Enqueue(QueueItem item)
         {
