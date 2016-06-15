@@ -14,11 +14,11 @@ namespace Queuete
         internal QueueProcessor processor;
 
         private readonly object locker = new object();
-        private readonly Func<Task> action;
+        private readonly Func<QueueItem, Task> action;
 
         private IImmutableQueue<QueueItem> dependents = ImmutableQueue<QueueItem>.Empty;
 
-        public QueueItem(QueueItemType type, Func<Task> action)
+        public QueueItem(QueueItemType type, Func<QueueItem, Task> action)
         {
             Type = type;
             this.action = action;
@@ -55,7 +55,7 @@ namespace Queuete
 
             try
             {
-                await action();
+                await action(this);
             }
             catch (Exception ex)
             {
