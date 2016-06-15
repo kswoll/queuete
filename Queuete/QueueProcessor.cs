@@ -1,5 +1,6 @@
 ﻿using System.Collections.Immutable;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -11,6 +12,7 @@ namespace Queuete
         private readonly AutoResetEvent waiter = new AutoResetEvent(false);
 
         private TaskCompletionSource<object> stopped;
+        private TaskCompletionSource<object> idled;
         private ImmutableQueue<QueueItem> queue = ImmutableQueue<QueueItem>.Empty;
         private CancellationTokenSource cancellationToken = new CancellationTokenSource();
 
@@ -26,6 +28,7 @@ namespace Queuete
 
         public void Start()
         {
+            idled = new TaskCompletionSource<object>();
             Task.Run(Process);
         }
 
@@ -38,17 +41,21 @@ namespace Queuete
             return stopped.Task;
         }
 
+        public Task WaitForIdle()
+        {
+            return idled.Task;
+        }
+
         private async Task Process()
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                QueueItem queueItem;
+                QueueItem queueItem = null;
                 lock (locker)
                 {
-                    queueItem = queue.Peek();
-                    if (queueItem != null)
+                    if (queue.Any())
                     {
-                        queue = queue.Dequeue();
+                        queue = queue.Dequeue(out queueItem);
                     }
                 }
 
@@ -57,7 +64,13 @@ namespace Queuete
                     await queueItem.Execute();
                 }
                 else
-                {                    
+                {
+                    lock (locker)
+                    {
+                        idled.SetResult(null);
+                        idled = new TaskCompletionSource<object>();
+                    }
+
                     // Wait for either a new item to be enqueued (waiter) or for the cancellation token to be triggered
                     WaitHandle.WaitAny(new[] { waiter, cancellationToken.Token.WaitHandle });
                 }

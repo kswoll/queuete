@@ -18,7 +18,7 @@ namespace Queuete
 
         private IImmutableQueue<QueueItem> dependents = ImmutableQueue<QueueItem>.Empty;
 
-        protected QueueItem(QueueItemType type, Func<Task> action)
+        public QueueItem(QueueItemType type, Func<Task> action)
         {
             Type = type;
             this.action = action;
