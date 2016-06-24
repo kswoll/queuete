@@ -15,11 +15,10 @@ namespace Queuete.Tests
         public async Task RunOneItem()
         {
             var executed = false;
-            var queueItem = new QueueItem(testItemType, async _ => executed = true);
 
             var processor = new QueueProcessor();
             processor.Start();
-            processor.Enqueue(queueItem);
+            processor.Enqueue(testItemType, async _ => executed = true);
             await processor.WaitForIdle();
 
             Assert.IsTrue(executed);
