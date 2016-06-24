@@ -97,18 +97,17 @@ namespace Queuete
 
             while (!cancellationToken.IsCancellationRequested)
             {
-                bool wasItemDequeued = false;
+                var wasItemDequeued = false;
                 foreach (var queue in GetAvailableQueues())
                 {
                     var queueItem = queue.Dequeue();
                     wasItemDequeued = true;
 
+                    queue.Activate(queueItem);
                     Task.Run(() => queueItem.Execute().ContinueWith(_ =>
                     {
-                        lock (locker)
-                        {
-                            checkIdle();
-                        }
+                        queue.Deactivate(queueItem);
+                        checkIdle();
                     }));
                 }
                 if (!wasItemDequeued)

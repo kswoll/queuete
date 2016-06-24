@@ -7,8 +7,8 @@ namespace Queuete
     internal class ItemQueue
     {
         public int Count => count;
-        public bool IsIdle => count == 0;
-        public bool IsAvailable => count < type.MaxConcurrentItems && count > 0;
+        public bool IsIdle => count == 0 && activeCount == 0;
+        public bool IsAvailable => activeCount < type.MaxConcurrentItems && count > 0;
 
         private readonly QueueItemType type;
         private readonly object locker = new object();
@@ -16,6 +16,7 @@ namespace Queuete
         private ImmutableQueue<QueueItem> queue = ImmutableQueue<QueueItem>.Empty;
         private ImmutableHashSet<QueueItem> activeItems = ImmutableHashSet<QueueItem>.Empty;
         private int count;
+        private int activeCount;
 
         public ItemQueue(QueueItemType type)
         {
@@ -42,19 +43,22 @@ namespace Queuete
             }
         }
 
-        public async Task Execute(QueueItem item)
+        public void Activate(QueueItem item)
         {
+            Interlocked.Increment(ref activeCount);
             lock (locker)
             {
                 activeItems = activeItems.Add(item);
-            }
+            }            
+        }
 
-            await item.Execute();
-
+        public void Deactivate(QueueItem item)
+        {
+            Interlocked.Decrement(ref activeCount);
             lock (locker)
             {
-                activeItems = activeItems.Add(item);
-            }
+                activeItems = activeItems.Remove(item);
+            }            
         }
     }
 }
