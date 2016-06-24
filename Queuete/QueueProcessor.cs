@@ -12,13 +12,37 @@ namespace Queuete
     {
         private readonly object locker = new object();
         private readonly AutoResetEvent waiter = new AutoResetEvent(false);
-        private readonly Dictionary<QueueItemType, Counter> countOfConcurrentTasksByItemType = new Dictionary<QueueItemType, Counter>();
 
         internal CancellationTokenSource cancellationToken = new CancellationTokenSource();
 
         private TaskCompletionSource<object> stopped;
         private TaskCompletionSource<object> idled;
-        private ImmutableQueue<QueueItem> queue = ImmutableQueue<QueueItem>.Empty;
+        private ImmutableDictionary<QueueItemType, ItemQueue> queuesByType = ImmutableDictionary<QueueItemType, ItemQueue>.Empty;
+        private ImmutableList<ItemQueue> queues = ImmutableList<ItemQueue>.Empty;
+
+        private ItemQueue GetQueue(QueueItemType type)
+        {
+            lock (locker)
+            {
+                ItemQueue queue;
+                if (!queuesByType.TryGetValue(type, out queue))
+                {
+                    queue = new ItemQueue(type);
+                    queues = queues.Add(queue);
+                    queuesByType = queuesByType.Add(type, queue);
+                }
+                return queue;
+            }
+        }
+
+        private IEnumerable<ItemQueue> GetAvailableQueues()
+        {
+            foreach (var queue in queues)
+            {
+                if (queue.IsAvailable)
+                    yield return queue;
+            }
+        }
 
         public QueueItem Enqueue(QueueItemType type, Func<QueueItem, Task> action)
         {
@@ -32,7 +56,7 @@ namespace Queuete
             item.processor = this;
             lock (locker)
             {
-                queue = queue.Enqueue(item);
+                GetQueue(item.Type).Enqueue(item);
             }
             waiter.Set();
         }
@@ -61,51 +85,35 @@ namespace Queuete
         {
             Action checkIdle = () =>
             {
-                if (countOfConcurrentTasksByItemType.All(x => x.Value.Count == 0))
+                lock (locker)
                 {
-                    idled.SetResult(null);
-                    idled = new TaskCompletionSource<object>();
+                    if (queues.All(x => x.IsIdle))
+                    {
+                        idled.SetResult(null);
+                        idled = new TaskCompletionSource<object>();
+                    }                    
                 }
             };
 
             while (!cancellationToken.IsCancellationRequested)
             {
-                QueueItem queueItem = null;
-                lock (locker)
+                bool wasItemDequeued = false;
+                foreach (var queue in GetAvailableQueues())
                 {
-                    if (queue.Any())
-                    {
-                        queue = queue.Dequeue(out queueItem);
-                    }
-                }
+                    var queueItem = queue.Dequeue();
+                    wasItemDequeued = true;
 
-                if (queueItem != null)
-                {
-                    lock (locker)
-                    {
-                        Counter counter;
-                        if (!countOfConcurrentTasksByItemType.TryGetValue(queueItem.Type, out counter))
-                        {
-                            counter = new Counter();
-                            countOfConcurrentTasksByItemType[queueItem.Type] = counter;
-                        }
-                        countOfConcurrentTasksByItemType[queueItem.Type].Count++;
-                    }
                     Task.Run(() => queueItem.Execute().ContinueWith(_ =>
                     {
                         lock (locker)
                         {
-                            countOfConcurrentTasksByItemType[queueItem.Type].Count--;
                             checkIdle();
                         }
                     }));
                 }
-                else
+                if (!wasItemDequeued)
                 {
-                    lock (locker)
-                    {
-                        checkIdle();
-                    }
+                    checkIdle();                    
 
                     // Wait for either a new item to be enqueued (waiter) or for the cancellation token to be triggered
                     WaitHandle.WaitAny(new[] { waiter, cancellationToken.Token.WaitHandle });
@@ -114,11 +122,6 @@ namespace Queuete
             Debug.Assert(stopped != null);
 
             stopped.SetResult(null);
-        }
-
-        private class Counter
-        {
-            public int Count { get; set; }
         }
     }
 }
