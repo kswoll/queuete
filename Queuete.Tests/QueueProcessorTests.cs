@@ -31,7 +31,7 @@ namespace Queuete.Tests
             {
                 Assert.AreEqual(QueueItemState.Running, x.State);
             });
-            Assert.AreEqual(QueueItemState.Waiting, queueItem.State);
+            Assert.AreEqual(QueueItemState.Pending, queueItem.State);
 
             var processor = new QueueProcessor();
             processor.Start();
@@ -100,6 +100,7 @@ namespace Queuete.Tests
             var processor = new QueueProcessor();
             processor.Start();
 
+            // Start up the first task that won't complete until we're sure the second task has been forced to wait
             var item1CompletionSource = new TaskCompletionSource<object>();
             processor.Enqueue(testItemType, _ => item1CompletionSource.Task);
 
