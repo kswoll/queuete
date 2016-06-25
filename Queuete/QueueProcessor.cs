@@ -67,7 +67,15 @@ namespace Queuete
             Task.Run(() => Process());
         }
 
-        public Task Stop()
+        public void Stop()
+        {
+            var waiter = new ManualResetEvent(false);
+            var stopAsync = StopAsync();
+            stopAsync.ContinueWith(_ => waiter.Set());
+            waiter.WaitOne();
+        }
+
+        public Task StopAsync()
         {
             stopped = new TaskCompletionSource<object>();
             stopped.Task.ContinueWith(_ => cancellationToken = new CancellationTokenSource());

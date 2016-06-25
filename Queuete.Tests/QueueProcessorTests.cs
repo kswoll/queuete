@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
 
@@ -78,6 +79,11 @@ namespace Queuete.Tests
         [Test]
         public async Task Stop()
         {
+            // We're going to set up a task to set this to true.  We're also going to have that task
+            // wait forever before setting it to true.  So, it's really not going to get set to true,
+            // (though we set it to true anyway to make things more clear)  So really, the failed state
+            // of this test will be if it hangs.  We're trying to stop the processor, which should cancel
+            // the task.  
             var executed = false;
             var queueItem = new QueueItem(testItemType, async x =>
             {
@@ -87,10 +93,27 @@ namespace Queuete.Tests
 
             var processor = new QueueProcessor();
             processor.Start();
-            processor.Enqueue(queueItem);
-            await Task.Delay(10);
-            await processor.Stop();
 
+            // Set up a waiter to block the main test until after the code in the StateChanged event below
+            // has executed.
+            var waiter = new ManualResetEvent(false);
+            queueItem.StateChanged += (item, state) =>
+            {
+                // If we just started the task, go ahead and force the queue processor to stop.  It will 
+                // cancel the task, and, since we used the cancellation token, it will abort immediately.
+                if (state == QueueItemState.Running)
+                    processor.Stop();
+
+                // Now release the waiter we set up above
+                waiter.Set();
+            };
+
+            // Enqueue that task and wait for the above state changed logic to finish.
+            processor.Enqueue(queueItem);
+            waiter.WaitOne();
+
+            // We've gotten here, which means all the active tasks have been cancelleed, and we can assert
+            // what certainly must be true.  We could omit this, but it's probably clearer to leave around.
             Assert.IsFalse(executed);
         }
 
