@@ -1,6 +1,5 @@
 ﻿using System.Collections.Immutable;
 using System.Threading;
-using System.Threading.Tasks;
 
 namespace Queuete
 {
@@ -59,6 +58,12 @@ namespace Queuete
             {
                 activeItems = activeItems.Remove(item);
             }            
+        }
+
+        public void MarkPending()
+        {
+            foreach (var item in queue) 
+                item.State = QueueItemState.Waiting;
         }
     }
 }

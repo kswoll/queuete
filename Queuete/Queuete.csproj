@@ -46,6 +46,7 @@
   <ItemGroup>
     <Compile Include="ItemQueue.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="QueueAction.cs" />
     <Compile Include="QueueItem.cs" />
     <Compile Include="QueueItemState.cs" />
     <Compile Include="QueueItemType.cs" />

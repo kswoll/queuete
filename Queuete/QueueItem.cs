@@ -8,15 +8,18 @@ namespace Queuete
 {
     public class QueueItem
     {
+        public event Action<QueueItem, QueueItemState> StateChanged;
+
         public QueueItemType Type { get; }
-        public QueueItemState State { get; set; } = QueueItemState.Waiting;
         public Exception Error { get; private set; }
         public CancellationToken CancellationToken => processor.cancellationToken.Token;
 
         internal QueueProcessor processor;
 
         private readonly object locker = new object();
-        private readonly Func<QueueItem, Task> action;
+        private readonly QueueAction action;
+
+        private QueueItemState state = QueueItemState.Pending;
 
         /// <summary>
         /// When this item completes, these dependents will be enqueued in their original order.
@@ -29,17 +32,30 @@ namespace Queuete
         /// </summary>
         private ImmutableList<QueueItem> dependencies = ImmutableList<QueueItem>.Empty;
 
-        internal QueueItem(QueueItemType type, Func<QueueItem, Task> action)
+        internal QueueItem(QueueItemType type, QueueAction action)
         {
             Type = type;
             this.action = action;
+        }
+
+        public QueueItemState State
+        {
+            get { return state; }
+            set
+            {
+                if (state != value)
+                {
+                    state = value;
+                    StateChanged?.Invoke(this, value);
+                }
+            }
         }
 
         /// <summary>
         /// Enqueues the specified dependent to only execute after this item has finished.  If this item has already finished,
         /// then it will simply be enqueued on the main processor.
         /// </summary>
-        public QueueItem EnqueueDependent(QueueItemType type, Func<QueueItem, Task> action)
+        public QueueItem EnqueueDependent(QueueItemType type, QueueAction action)
         {
             lock (locker)
             {

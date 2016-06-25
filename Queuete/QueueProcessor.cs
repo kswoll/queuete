@@ -44,7 +44,7 @@ namespace Queuete
             }
         }
 
-        public QueueItem Enqueue(QueueItemType type, Func<QueueItem, Task> action)
+        public QueueItem Enqueue(QueueItemType type, QueueAction action)
         {
             var item = new QueueItem(type, action);
             Enqueue(item);
@@ -83,6 +83,9 @@ namespace Queuete
 
         private void Process()
         {
+            // Called at any point where we might have become idle:
+            // * When no queue provided an item to process on a given round
+            // * When a queue item finishes processing it might be the last one
             Action checkIdle = () =>
             {
                 lock (locker)
@@ -95,20 +98,32 @@ namespace Queuete
                 }
             };
 
+            // Each iteration here we'll call a round
             while (!cancellationToken.IsCancellationRequested)
             {
                 var wasItemDequeued = false;
-                foreach (var queue in GetAvailableQueues())
+                foreach (var queue in queues)
                 {
-                    var queueItem = queue.Dequeue();
-                    wasItemDequeued = true;
-
-                    queue.Activate(queueItem);
-                    Task.Run(() => queueItem.Execute().ContinueWith(_ =>
+                    if (queue.IsAvailable)
                     {
-                        queue.Deactivate(queueItem);
-                        checkIdle();
-                    }));
+                        QueueItem queueItem;
+                        lock (locker)
+                        {
+                            queueItem = queue.Dequeue();
+                            wasItemDequeued = true;
+                            queue.Activate(queueItem);
+                        }
+                        Task.Run(() => queueItem.Execute().ContinueWith(_ =>
+                        {
+                            queue.Deactivate(queueItem);
+                            waiter.Set();
+                            checkIdle();
+                        }));                            
+                    }
+                    else
+                    {
+                        queue.MarkPending();
+                    }
                 }
                 if (!wasItemDequeued)
                 {
