@@ -107,7 +107,7 @@ namespace Queuete
                 var wasItemDequeued = false;
                 foreach (var queue in queues)
                 {
-                    if (queue.IsAvailable && (!queue.Type.IsCancellable || !cancellationToken.IsCancellationRequested))
+                    if (queue.IsAvailable && (!queue.Type.IsCancellable(this) || !cancellationToken.IsCancellationRequested))
                     {
                         QueueItem queueItem;
                         lock (locker)

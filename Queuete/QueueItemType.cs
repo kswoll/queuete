@@ -6,20 +6,25 @@ namespace Queuete
     {
         public string Label { get; }
         public int MaxConcurrentItems { get; }
-        public bool IsCancellable { get; }
 
-        private Func<QueueProcessor, QueueItemType, bool> isBlocked;
+        private readonly Func<QueueProcessor, QueueItemType, bool> isCancellable;
+        private readonly Func<QueueProcessor, QueueItemType, bool> isBlocked;
 
-        public QueueItemType(string label, int maxConcurrentItems, bool isCancellable = true, Func<QueueProcessor, QueueItemType, bool> isBlocked = null)
+        public QueueItemType(string label, int maxConcurrentItems, Func<QueueProcessor, QueueItemType, bool> isCancellable = null, Func<QueueProcessor, QueueItemType, bool> isBlocked = null)
         {
             if (maxConcurrentItems <= 0)
                 throw new ArgumentOutOfRangeException(nameof(maxConcurrentItems), "Value must be greater than zero.");
 
+            this.isCancellable = isCancellable ?? ((processor, item) => true);
             this.isBlocked = isBlocked ?? ((processor, item) => false);
 
             Label = label;
             MaxConcurrentItems = maxConcurrentItems;
-            IsCancellable = isCancellable;
+        }
+
+        public bool IsCancellable(QueueProcessor processor)
+        {
+            return isCancellable(processor, this);
         }
 
         public bool IsBlocked(QueueProcessor processor)

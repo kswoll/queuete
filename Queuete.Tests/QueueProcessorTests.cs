@@ -268,7 +268,7 @@ namespace Queuete.Tests
             });
 
             var didItem2Finish = false;
-            var blockedType = new QueueItemType("blocked", 1, true, (_, type) => !processor.IsQueueIdle(testItemType));
+            var blockedType = new QueueItemType("blocked", 1, isBlocked: (_, type) => !processor.IsQueueIdle(testItemType));
             var item2 = new QueueItem(blockedType, async _ => didItem2Finish = true);
             item2.StateChanged += (item, state) =>
             {
