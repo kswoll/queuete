@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Linq;
@@ -25,7 +26,7 @@ namespace Queuete
             return GetQueue(type).IsIdle;
         }
 
-        internal ItemQueue GetQueue(QueueItemType type)
+        private ItemQueue GetQueue(QueueItemType type)
         {
             lock (locker)
             {
@@ -53,6 +54,43 @@ namespace Queuete
             queue.InitializeItem(item);
             queue.Enqueue(item);
             waiter.Set();
+        }
+
+        /// <summary>
+        /// Enqueues the specified dependent to only execute after this item has finished.  If this item has already finished,
+        /// then it will simply be enqueued on the main processor.
+        /// </summary>
+        public QueueItem EnqueueDependent(IEnumerable<QueueItem> dependencies, QueueItemType type, QueueAction action)
+        {
+            var dependent = new QueueItem(type, action);
+            EnqueueDependent(dependencies, dependent);
+            return dependent;
+        }
+
+        public void EnqueueDependent(IEnumerable<QueueItem> dependencies, QueueItem dependent)
+        {
+            var queue = GetQueue(dependent.Type);
+            queue.InitializeItem(dependent);
+
+            bool areDependenciesFinished = dependencies.All(x => x.State == QueueItemState.Finished);
+
+            // If we've already finished, then there is no dependency, so just enqueue the item as a normal item.
+            if (areDependenciesFinished)
+            {
+                Enqueue(dependent);
+            }
+            else
+            {
+                dependent.State = QueueItemState.Blocked;
+                foreach (var dependency in dependencies)
+                {
+                    if (dependency.State != QueueItemState.Finished)
+                    {
+                        dependency.EnqueueDependent(dependent);
+                        dependent.AddDependency(dependency);
+                    }
+                }
+            }
         }
 
         public void Start()

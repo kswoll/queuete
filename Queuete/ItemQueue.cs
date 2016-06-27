@@ -20,6 +20,7 @@ namespace Queuete
         private ImmutableHashSet<QueueItem> activeItems = ImmutableHashSet<QueueItem>.Empty;
         private int count;
         private int activeCount;
+        private bool isInitialized;
 
         public ItemQueue(QueueProcessor processor, QueueItemType type)
         {
@@ -83,8 +84,15 @@ namespace Queuete
 
         public void InitializeItem(QueueItem item)
         {
-            item.processor = processor;
-            item.queue = this;
+            lock (locker)
+            {
+                if (!isInitialized)
+                {
+                    isInitialized = true;
+                    item.processor = processor;
+                    item.queue = this;
+                }
+            }
         }
     }
 }

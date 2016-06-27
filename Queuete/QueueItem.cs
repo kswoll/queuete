@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using System.Threading;
@@ -13,6 +14,7 @@ namespace Queuete
         public QueueItemType Type { get; }
         public Exception Error { get; private set; }
         public CancellationToken CancellationToken => queue.cancellationToken.Token;
+        public IEnumerable<QueueItem> Dependents => dependents;
 
         internal QueueProcessor processor;
         internal ItemQueue queue;
@@ -40,56 +42,43 @@ namespace Queuete
             Type = type;
         }
 
-        public QueueItemState State
+        internal void EnqueueDependent(QueueItem dependent)
         {
-            get { return state; }
-            set
+            lock (locker)
             {
-                if (state != value)
-                {
-                    state = value;
-                    StateChanged?.Invoke(this, value);
-                }
+                dependents = dependents.Enqueue(dependent);
             }
         }
 
-        /// <summary>
-        /// Enqueues the specified dependent to only execute after this item has finished.  If this item has already finished,
-        /// then it will simply be enqueued on the main processor.
-        /// </summary>
-        public QueueItem EnqueueDependent(QueueItemType type, QueueAction action)
+        internal void AddDependency(QueueItem dependency)
         {
-            var dependent = new QueueItem(type, action);
-            EnqueueDependent(dependent);
-            return dependent;
-        }
-
-        public void EnqueueDependent(QueueItem dependent)
-        {
-            var queue = processor.GetQueue(dependent.Type);
-            queue.InitializeItem(dependent);
-
             lock (locker)
             {
-                // If we've already finished, then there is no dependency, so just enqueue the item as a normal item.
-                if (State == QueueItemState.Finished)
+                dependencies = dependencies.Add(dependency);
+            }
+        }
+
+        public QueueItemState State
+        {
+            get
+            {
+                return state;
+            }
+            set
+            {
+                var intState = (int)state;
+                var intValue = (int)value;
+                var changed = Interlocked.CompareExchange(ref intState, intValue, intValue) != intValue;
+                if (changed)
                 {
-                    processor.Enqueue(dependent);
-                }
-                else
-                {
-                    dependent.State = QueueItemState.Blocked;
-                    dependents = dependents.Enqueue(dependent);
+                    StateChanged?.Invoke(this, value);
                 }
             }
         }
 
         internal async Task Execute()
         {
-            lock (locker)
-            {
-                State = QueueItemState.Running;
-            }
+            State = QueueItemState.Running;
 
             try
             {
@@ -102,10 +91,7 @@ namespace Queuete
 
             if (Error != null)
             {
-                lock (locker)
-                {
-                    State = QueueItemState.Errored;
-                }
+                State = QueueItemState.Errored;
             }
             else
             {
