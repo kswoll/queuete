@@ -109,10 +109,10 @@ namespace Queuete
             }
             else
             {
+                State = QueueItemState.Finished;
                 QueueItem[] dependents;
                 lock (locker)
                 {
-                    State = QueueItemState.Finished;
                     dependents = this.dependents.ToArray();
                     this.dependents = ImmutableQueue<QueueItem>.Empty;
                 }

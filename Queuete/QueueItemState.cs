@@ -5,7 +5,7 @@
         Pending,
         Waiting,
         Blocked,
-        Running, 
+        Running,
         Finished,
         Errored
     }
