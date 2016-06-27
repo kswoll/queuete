@@ -57,21 +57,26 @@ namespace Queuete
         /// </summary>
         public QueueItem EnqueueDependent(QueueItemType type, QueueAction action)
         {
+            var dependent = new QueueItem(type, action);
+            EnqueueDependent(dependent);
+            return dependent;
+        }
+
+        public void EnqueueDependent(QueueItem dependent)
+        {
             lock (locker)
             {
                 // If we've already finished, then there is no dependency, so just enqueue the item as a normal item.
                 if (State == QueueItemState.Finished)
                 {
-                    return processor.Enqueue(type, action);
+                    processor.Enqueue(dependent);
                 }
                 else
                 {
-                    var dependent = new QueueItem(type, action);
                     dependent.State = QueueItemState.Blocked;
                     dependents = dependents.Enqueue(dependent);
-                    return dependent;
                 }
-            }            
+            }
         }
 
         internal async Task Execute()

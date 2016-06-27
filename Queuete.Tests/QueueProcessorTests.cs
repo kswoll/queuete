@@ -131,7 +131,8 @@ namespace Queuete.Tests
             // When the second task sets this we know the chain of events has happened in order
             bool didItem2Run = false;
 
-            var item2 = processor.Enqueue(testItemType, async _ => didItem2Run = true);
+            var item2 = new QueueItem(testItemType, async _ => didItem2Run = true);
+            processor.Enqueue(item2);
 
             // When the second item has had its state changed to waiting, it means that we had reached our max concurrent
             // count and been forced into a waiting state.  Bingo!  That's the main point of this test.
@@ -186,6 +187,42 @@ namespace Queuete.Tests
 
             // These last two line aren't strictly necessary for the purposes of this test, but seems cleaner if we follow through.
             Assert.IsTrue(didTask1Finish);
+            Assert.IsTrue(didTask2Finish);
+        }
+
+        [Test]
+        public async Task DependentTaskWaitsInLine()
+        {
+            var processor = new QueueProcessor();
+            processor.Start();
+
+            // Start up the first task that won't complete until we're sure both tasks started
+            var item1CompletionSource = new TaskCompletionSource<object>();
+            var item1 = processor.Enqueue(testItemType, async _ =>
+            {
+                await item1CompletionSource.Task;
+            });
+
+            // Start up the second task that won't complete until the first one is done
+            var didTask2Finish = false;
+            var item2 = new QueueItem(secondItemType, async _ =>
+            {
+                didTask2Finish = true;
+            });
+
+            item2.StateChanged += (item, state) =>
+            {
+                // Now that we know the desired state has been reached, we can allow the first task to continue
+                if (state == QueueItemState.Blocked)
+                    item1CompletionSource.SetResult(null);
+            };
+
+            item1.EnqueueDependent(item2);
+
+            // Wait for everything to finish.
+            await processor.WaitForIdle();
+
+            // These last two line aren't strictly necessary for the purposes of this test, but seems cleaner if we follow through.
             Assert.IsTrue(didTask2Finish);
         }
     }
