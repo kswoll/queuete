@@ -14,6 +14,8 @@ namespace Queuete
         private readonly QueueItemType type;
         private readonly object locker = new object();
 
+        internal CancellationTokenSource cancellationToken = new CancellationTokenSource();
+
         private ImmutableQueue<QueueItem> queue = ImmutableQueue<QueueItem>.Empty;
         private ImmutableHashSet<QueueItem> activeItems = ImmutableHashSet<QueueItem>.Empty;
         private int count;
@@ -23,6 +25,11 @@ namespace Queuete
         {
             this.processor = processor;
             this.type = type;
+        }
+
+        public void Cancel()
+        {
+            cancellationToken.Cancel();
         }
 
         public void Enqueue(QueueItem item)
@@ -67,6 +74,11 @@ namespace Queuete
         {
             foreach (var item in queue)
                 item.State = QueueItemState.Waiting;
+        }
+
+        public void NotifyStopped()
+        {
+            cancellationToken = new CancellationTokenSource();
         }
     }
 }

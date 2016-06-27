@@ -51,6 +51,7 @@
     <Compile Include="QueueItemState.cs" />
     <Compile Include="QueueItemType.cs" />
     <Compile Include="QueueProcessor.cs" />
+    <Compile Include="QueueStopReason.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

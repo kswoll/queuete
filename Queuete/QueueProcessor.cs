@@ -9,22 +9,23 @@ namespace Queuete
 {
     public class QueueProcessor
     {
+        private static readonly QueueStopReason defaultStopReason = new QueueStopReason("Default", (processor, itemType) => itemType.IsCancellable(processor));
+
         private readonly object locker = new object();
         private readonly AutoResetEvent waiter = new AutoResetEvent(false);
-
-        internal CancellationTokenSource cancellationToken = new CancellationTokenSource();
 
         private TaskCompletionSource<object> stopped;
         private TaskCompletionSource<object> idled;
         private ImmutableDictionary<QueueItemType, ItemQueue> queuesByType = ImmutableDictionary<QueueItemType, ItemQueue>.Empty;
         private ImmutableList<ItemQueue> queues = ImmutableList<ItemQueue>.Empty;
+        private QueueStopReason stopReason;
 
         public bool IsQueueIdle(QueueItemType type)
         {
             return GetQueue(type).IsIdle;
         }
 
-        private ItemQueue GetQueue(QueueItemType type)
+        internal ItemQueue GetQueue(QueueItemType type)
         {
             lock (locker)
             {
@@ -48,11 +49,10 @@ namespace Queuete
 
         public void Enqueue(QueueItem item)
         {
+            var queue = GetQueue(item.Type);
             item.processor = this;
-            lock (locker)
-            {
-                GetQueue(item.Type).Enqueue(item);
-            }
+            item.queue = queue;
+            queue.Enqueue(item);
             waiter.Set();
         }
 
@@ -62,20 +62,28 @@ namespace Queuete
             Task.Run(() => Process());
         }
 
-        public void Stop()
+        public void Stop(QueueStopReason reason = null)
         {
             var waiter = new ManualResetEvent(false);
-            var stopAsync = StopAsync();
+            var stopAsync = StopAsync(reason);
             stopAsync.ContinueWith(_ => waiter.Set());
             waiter.WaitOne();
         }
 
-        public Task StopAsync()
+        public Task StopAsync(QueueStopReason reason = null)
         {
+            stopReason = reason = reason ?? defaultStopReason;
             stopped = new TaskCompletionSource<object>();
-            stopped.Task.ContinueWith(_ => cancellationToken = new CancellationTokenSource());
 
-            cancellationToken.Cancel();
+            lock (locker)
+            {
+                foreach (var queue in queues.Where(x => reason.IsCancellable(this, x.Type)))
+                {
+                    queue.Cancel();
+                }
+            }
+
+            waiter.Set();
             return stopped.Task;
         }
 
@@ -107,7 +115,7 @@ namespace Queuete
                 var wasItemDequeued = false;
                 foreach (var queue in queues)
                 {
-                    if (queue.IsAvailable && (!queue.Type.IsCancellable(this) || !cancellationToken.IsCancellationRequested))
+                    if (queue.IsAvailable && (!queue.cancellationToken.IsCancellationRequested || stopReason.IsCancellable(this, queue.Type)))
                     {
                         QueueItem queueItem;
                         lock (locker)
@@ -130,17 +138,18 @@ namespace Queuete
                 }
                 if (!wasItemDequeued)
                 {
-                    if (cancellationToken.IsCancellationRequested)
+                    if (stopReason != null)
                         break;
 
                     checkIdle();
 
                     // Wait for either a new item to be enqueued (waiter) or for the cancellation token to be triggered
-                    WaitHandle.WaitAny(new[] { waiter, cancellationToken.Token.WaitHandle });
+                    waiter.WaitOne();
                 }
             }
             Debug.Assert(stopped != null);
 
+            stopReason = null;
             stopped.SetResult(null);
         }
     }

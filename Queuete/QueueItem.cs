@@ -12,9 +12,10 @@ namespace Queuete
 
         public QueueItemType Type { get; }
         public Exception Error { get; private set; }
-        public CancellationToken CancellationToken => processor.cancellationToken.Token;
+        public CancellationToken CancellationToken => queue.cancellationToken.Token;
 
         internal QueueProcessor processor;
+        internal ItemQueue queue;
 
         private readonly object locker = new object();
         private readonly QueueAction action;
@@ -32,10 +33,11 @@ namespace Queuete
         /// </summary>
         private ImmutableList<QueueItem> dependencies = ImmutableList<QueueItem>.Empty;
 
-        internal QueueItem(QueueItemType type, QueueAction action)
+        public QueueItem(QueueItemType type, QueueAction action)
         {
-            Type = type;
             this.action = action;
+
+            Type = type;
         }
 
         public QueueItemState State
@@ -64,6 +66,10 @@ namespace Queuete
 
         public void EnqueueDependent(QueueItem dependent)
         {
+            var queue = processor.GetQueue(dependent.Type);
+            dependent.processor = processor;
+            dependent.queue = queue;
+
             lock (locker)
             {
                 // If we've already finished, then there is no dependency, so just enqueue the item as a normal item.
