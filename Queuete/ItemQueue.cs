@@ -80,5 +80,11 @@ namespace Queuete
         {
             cancellationToken = new CancellationTokenSource();
         }
+
+        public void InitializeItem(QueueItem item)
+        {
+            item.processor = processor;
+            item.queue = this;
+        }
     }
 }

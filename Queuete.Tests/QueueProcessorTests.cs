@@ -282,5 +282,35 @@ namespace Queuete.Tests
 
             Assert.IsTrue(didItem2Finish);
         }
+
+        [Test]
+        public async Task CustomStopReasonPreventsCancel()
+        {
+            var processor = new QueueProcessor();
+            processor.Start();
+
+            var stopReason = new QueueStopReason("Custom", (_, __) => false);
+
+            // Start up the first task that won't complete until we're sure both tasks started
+            var item1CompletionSource = new TaskCompletionSource<object>();
+            var waiter = new ManualResetEvent(false);
+            var didItem1Finish = false;
+            processor.Enqueue(testItemType, async _ =>
+            {
+                waiter.Set();
+                await item1CompletionSource.Task;
+                didItem1Finish = true;
+            });
+
+            waiter.WaitOne();
+
+            var stop = processor.StopAsync(stopReason);
+
+            item1CompletionSource.SetResult(null);
+
+            await stop;
+
+            Assert.IsTrue(didItem1Finish);
+        }
     }
 }

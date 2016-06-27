@@ -50,8 +50,7 @@ namespace Queuete
         public void Enqueue(QueueItem item)
         {
             var queue = GetQueue(item.Type);
-            item.processor = this;
-            item.queue = queue;
+            queue.InitializeItem(item);
             queue.Enqueue(item);
             waiter.Set();
         }

@@ -67,8 +67,7 @@ namespace Queuete
         public void EnqueueDependent(QueueItem dependent)
         {
             var queue = processor.GetQueue(dependent.Type);
-            dependent.processor = processor;
-            dependent.queue = queue;
+            queue.InitializeItem(dependent);
 
             lock (locker)
             {
