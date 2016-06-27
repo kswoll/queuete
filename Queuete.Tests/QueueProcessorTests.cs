@@ -11,6 +11,7 @@ namespace Queuete.Tests
     public class QueueProcessorTests
     {
         private static readonly QueueItemType testItemType = new QueueItemType("test", 1);
+        private static readonly QueueItemType secondItemType = new QueueItemType("second", 1);
 
         [Test]
         public async Task RunOneItem()
@@ -83,7 +84,7 @@ namespace Queuete.Tests
             // wait forever before setting it to true.  So, it's really not going to get set to true,
             // (though we set it to true anyway to make things more clear)  So really, the failed state
             // of this test will be if it hangs.  We're trying to stop the processor, which should cancel
-            // the task.  
+            // the task.
             var executed = false;
             var queueItem = new QueueItem(testItemType, async x =>
             {
@@ -99,7 +100,7 @@ namespace Queuete.Tests
             var waiter = new ManualResetEvent(false);
             queueItem.StateChanged += (item, state) =>
             {
-                // If we just started the task, go ahead and force the queue processor to stop.  It will 
+                // If we just started the task, go ahead and force the queue processor to stop.  It will
                 // cancel the task, and, since we used the cancellation token, it will abort immediately.
                 if (state == QueueItemState.Running)
                     processor.Stop();
@@ -132,7 +133,7 @@ namespace Queuete.Tests
 
             var item2 = processor.Enqueue(testItemType, async _ => didItem2Run = true);
 
-            // When the second item has had its state changed to waiting, it means that we had reached our max concurrent 
+            // When the second item has had its state changed to waiting, it means that we had reached our max concurrent
             // count and been forced into a waiting state.  Bingo!  That's the main point of this test.
             item2.StateChanged += (item, state) =>
             {
@@ -144,9 +145,48 @@ namespace Queuete.Tests
             // Wait for everything to finish
             await processor.WaitForIdle();
 
-            // Wait for task 2 to complete.  These last two line aren't strictly necessary for the purposes of this test,
-            // but seems cleaner if we follow through.
+            // This last line isn't strictly necessary for the purposes of this test, but seems cleaner if we follow through.
             Assert.IsTrue(didItem2Run);
+        }
+
+        [Test]
+        public async Task DifferentTaskTypesRunConcurrently()
+        {
+            var processor = new QueueProcessor();
+            processor.Start();
+
+            // Start up the first task that won't complete until we're sure both tasks started
+            var item1CompletionSource = new TaskCompletionSource<object>();
+            var waiter1 = new ManualResetEvent(false);
+            var didTask1Finish = false;
+            processor.Enqueue(testItemType, async _ =>
+            {
+                waiter1.Set();
+                await item1CompletionSource.Task;
+                didTask1Finish = true;
+            });
+
+            // Start up the second task that won't complete until we're sure both tasks started
+            var item2CompletionSource = new TaskCompletionSource<object>();
+            var waiter2 = new ManualResetEvent(false);
+            var didTask2Finish = false;
+            processor.Enqueue(secondItemType, async _ =>
+            {
+                waiter2.Set();
+                await item2CompletionSource.Task;
+                didTask2Finish = true;
+            });
+
+            WaitHandle.WaitAll(new[] { waiter1, waiter2 });
+            item1CompletionSource.SetResult(null);
+            item2CompletionSource.SetResult(null);
+
+            // Wait for everything to finish.
+            await processor.WaitForIdle();
+
+            // These last two line aren't strictly necessary for the purposes of this test, but seems cleaner if we follow through.
+            Assert.IsTrue(didTask1Finish);
+            Assert.IsTrue(didTask2Finish);
         }
     }
 }
