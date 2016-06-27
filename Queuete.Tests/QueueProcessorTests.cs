@@ -225,5 +225,62 @@ namespace Queuete.Tests
             // These last two line aren't strictly necessary for the purposes of this test, but seems cleaner if we follow through.
             Assert.IsTrue(didTask2Finish);
         }
+
+        [Test]
+        public async Task NonCancellableTaskCompletesOnCancel()
+        {
+            var processor = new QueueProcessor();
+            processor.Start();
+
+            // Start up the first task that won't complete until we're sure both tasks started
+            var item1CompletionSource = new TaskCompletionSource<object>();
+            var waiter = new ManualResetEvent(false);
+            var didItem1Finish = false;
+            processor.Enqueue(new QueueItemType("noncancellable", 1), async _ =>
+            {
+                waiter.Set();
+                await item1CompletionSource.Task;
+                didItem1Finish = true;
+            });
+
+            waiter.WaitOne();
+
+            var stop = processor.StopAsync();
+
+            item1CompletionSource.SetResult(null);
+
+            await stop;
+
+            Assert.IsTrue(didItem1Finish);
+        }
+
+        [Test]
+        public async Task CustomBlockingObeyed()
+        {
+            var processor = new QueueProcessor();
+            processor.Start();
+
+            // Start up the first task that won't complete until we're sure both tasks started
+            var item1CompletionSource = new TaskCompletionSource<object>();
+            processor.Enqueue(testItemType, async _ =>
+            {
+                await item1CompletionSource.Task;
+            });
+
+            var didItem2Finish = false;
+            var blockedType = new QueueItemType("blocked", 1, true, (_, type) => !processor.IsQueueIdle(testItemType));
+            var item2 = new QueueItem(blockedType, async _ => didItem2Finish = true);
+            item2.StateChanged += (item, state) =>
+            {
+                if (state == QueueItemState.Waiting)
+                    item1CompletionSource.SetResult(null);
+            };
+            processor.Enqueue(item2);
+
+            // Wait for everything to finish.
+            await processor.WaitForIdle();
+
+            Assert.IsTrue(didItem2Finish);
+        }
     }
 }

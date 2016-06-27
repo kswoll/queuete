@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Linq;
@@ -20,6 +19,11 @@ namespace Queuete
         private ImmutableDictionary<QueueItemType, ItemQueue> queuesByType = ImmutableDictionary<QueueItemType, ItemQueue>.Empty;
         private ImmutableList<ItemQueue> queues = ImmutableList<ItemQueue>.Empty;
 
+        public bool IsQueueIdle(QueueItemType type)
+        {
+            return GetQueue(type).IsIdle;
+        }
+
         private ItemQueue GetQueue(QueueItemType type)
         {
             lock (locker)
@@ -27,20 +31,11 @@ namespace Queuete
                 ItemQueue queue;
                 if (!queuesByType.TryGetValue(type, out queue))
                 {
-                    queue = new ItemQueue(type);
+                    queue = new ItemQueue(this, type);
                     queues = queues.Add(queue);
                     queuesByType = queuesByType.Add(type, queue);
                 }
                 return queue;
-            }
-        }
-
-        private IEnumerable<ItemQueue> GetAvailableQueues()
-        {
-            foreach (var queue in queues)
-            {
-                if (queue.IsAvailable)
-                    yield return queue;
             }
         }
 
@@ -102,17 +97,17 @@ namespace Queuete
                     {
                         idled.SetResult(null);
                         idled = new TaskCompletionSource<object>();
-                    }                    
+                    }
                 }
             };
 
             // Each iteration here we'll call a round
-            while (!cancellationToken.IsCancellationRequested)
+            while (true)
             {
                 var wasItemDequeued = false;
                 foreach (var queue in queues)
                 {
-                    if (queue.IsAvailable)
+                    if (queue.IsAvailable && (!queue.Type.IsCancellable || !cancellationToken.IsCancellationRequested))
                     {
                         QueueItem queueItem;
                         lock (locker)
@@ -126,7 +121,7 @@ namespace Queuete
                             queue.Deactivate(queueItem);
                             waiter.Set();
                             checkIdle();
-                        }));                            
+                        }));
                     }
                     else
                     {
@@ -135,7 +130,10 @@ namespace Queuete
                 }
                 if (!wasItemDequeued)
                 {
-                    checkIdle();                    
+                    if (cancellationToken.IsCancellationRequested)
+                        break;
+
+                    checkIdle();
 
                     // Wait for either a new item to be enqueued (waiter) or for the cancellation token to be triggered
                     WaitHandle.WaitAny(new[] { waiter, cancellationToken.Token.WaitHandle });
