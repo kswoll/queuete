@@ -1,4 +1,5 @@
 ﻿using System.Collections.Immutable;
+using System.Linq;
 using System.Threading;
 
 namespace Queuete
@@ -8,11 +9,10 @@ namespace Queuete
         public QueueItemType Type => type;
         public int Count => count;
         public bool IsIdle => count == 0 && activeCount == 0;
-        public bool IsAvailable => activeCount < type.MaxConcurrentItems && count > 0 && !type.IsBlocked(processor);
+        public bool IsAvailable => activeCount < type.MaxConcurrentItems && count > 0 && !type.IsBlocked(processor) && !activeItems.Any(x => x.Dependents.Any());
 
         private readonly QueueProcessor processor;
         private readonly QueueItemType type;
-        private readonly object locker = new object();
 
         internal CancellationTokenSource cancellationToken = new CancellationTokenSource();
 
@@ -20,7 +20,6 @@ namespace Queuete
         private ImmutableHashSet<QueueItem> activeItems = ImmutableHashSet<QueueItem>.Empty;
         private int count;
         private int activeCount;
-        private bool isInitialized;
 
         public ItemQueue(QueueProcessor processor, QueueItemType type)
         {
@@ -35,40 +34,36 @@ namespace Queuete
 
         public void Enqueue(QueueItem item)
         {
-            Interlocked.Increment(ref count);
-            lock (locker)
-            {
-                queue = queue.Enqueue(item);
-            }
+            processor.EnsureOnProcessorThread();
+
+            count++;
+            queue = queue.Enqueue(item);
         }
 
         public QueueItem Dequeue()
         {
-            Interlocked.Decrement(ref count);
-            lock (locker)
-            {
-                QueueItem item;
-                queue = queue.Dequeue(out item);
-                return item;
-            }
+            processor.EnsureOnProcessorThread();
+
+            count--;
+            QueueItem item;
+            queue = queue.Dequeue(out item);
+            return item;
         }
 
         public void Activate(QueueItem item)
         {
-            Interlocked.Increment(ref activeCount);
-            lock (locker)
-            {
-                activeItems = activeItems.Add(item);
-            }
+            processor.EnsureOnProcessorThread();
+
+            activeCount++;
+            activeItems = activeItems.Add(item);
         }
 
         public void Deactivate(QueueItem item)
         {
-            Interlocked.Decrement(ref activeCount);
-            lock (locker)
-            {
-                activeItems = activeItems.Remove(item);
-            }
+            processor.EnsureOnProcessorThread();
+
+            activeCount--;
+            activeItems = activeItems.Remove(item);
         }
 
         public void MarkPending()
@@ -84,15 +79,12 @@ namespace Queuete
 
         public void InitializeItem(QueueItem item)
         {
-            lock (locker)
-            {
-                if (!isInitialized)
-                {
-                    isInitialized = true;
-                    item.processor = processor;
-                    item.queue = this;
-                }
-            }
+            item.InitializeItem(processor, this);
+        }
+
+        public override string ToString()
+        {
+            return type.Label;
         }
     }
 }

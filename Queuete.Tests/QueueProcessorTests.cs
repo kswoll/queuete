@@ -13,12 +13,20 @@ namespace Queuete.Tests
         private static readonly QueueItemType testItemType = new QueueItemType("test", 1);
         private static readonly QueueItemType secondItemType = new QueueItemType("second", 1);
 
+        private QueueProcessor CreateProcessor()
+        {
+            return new QueueProcessor
+            {
+                Logger = x => Console.WriteLine(x)
+            };
+        }
+
         [Test]
         public async Task RunOneItem()
         {
             var executed = false;
 
-            var processor = new QueueProcessor();
+            var processor = CreateProcessor();
             processor.Start();
             processor.Enqueue(testItemType, async _ => executed = true);
             await processor.WaitForIdle();
@@ -35,7 +43,7 @@ namespace Queuete.Tests
             });
             Assert.AreEqual(QueueItemState.Pending, queueItem.State);
 
-            var processor = new QueueProcessor();
+            var processor = CreateProcessor();
             processor.Start();
             processor.Enqueue(queueItem);
             await processor.WaitForIdle();
@@ -51,7 +59,7 @@ namespace Queuete.Tests
             });
             Assert.AreEqual(QueueItemState.Pending, queueItem.State);
 
-            var processor = new QueueProcessor();
+            var processor = CreateProcessor();
             processor.Start();
             processor.Enqueue(queueItem);
             await processor.WaitForIdle();
@@ -69,7 +77,7 @@ namespace Queuete.Tests
             });
             Assert.AreEqual(QueueItemState.Pending, queueItem.State);
 
-            var processor = new QueueProcessor();
+            var processor = CreateProcessor();
             processor.Start();
             processor.Enqueue(queueItem);
             await processor.WaitForIdle();
@@ -92,7 +100,7 @@ namespace Queuete.Tests
                 executed = true;
             });
 
-            var processor = new QueueProcessor();
+            var processor = CreateProcessor();
             processor.Start();
 
             // Set up a waiter to block the main test until after the code in the StateChanged event below
@@ -121,7 +129,7 @@ namespace Queuete.Tests
         [Test]
         public async Task MaxConcurrentCountObeyed()
         {
-            var processor = new QueueProcessor();
+            var processor = CreateProcessor();
             processor.Start();
 
             // Start up the first task that won't complete until we're sure the second task has been forced to wait
@@ -153,7 +161,7 @@ namespace Queuete.Tests
         [Test]
         public async Task DifferentTaskTypesRunConcurrently()
         {
-            var processor = new QueueProcessor();
+            var processor = CreateProcessor();
             processor.Start();
 
             // Start up the first task that won't complete until we're sure both tasks started
@@ -193,7 +201,7 @@ namespace Queuete.Tests
         [Test]
         public async Task DependentTaskWaitsInLine()
         {
-            var processor = new QueueProcessor();
+            var processor = CreateProcessor();
             processor.Start();
 
             // Start up the first task that won't complete until we're sure both tasks started
@@ -201,6 +209,7 @@ namespace Queuete.Tests
             var item1 = processor.Enqueue(testItemType, async _ =>
             {
                 await item1CompletionSource.Task;
+                processor.Log("Task1 finished");
             });
 
             // Start up the second task that won't complete until the first one is done
@@ -217,7 +226,8 @@ namespace Queuete.Tests
                     item1CompletionSource.SetResult(null);
             };
 
-            item1.EnqueueDependent(item2);
+            processor.Log("Enqueueing dependent");
+            processor.EnqueueDependent(item1, item2);
 
             // Wait for everything to finish.
             await processor.WaitForIdle();
@@ -229,7 +239,7 @@ namespace Queuete.Tests
         [Test]
         public async Task NonCancellableTaskCompletesOnCancel()
         {
-            var processor = new QueueProcessor();
+            var processor = CreateProcessor();
             processor.Start();
 
             // Start up the first task that won't complete until we're sure both tasks started
@@ -257,7 +267,7 @@ namespace Queuete.Tests
         [Test]
         public async Task CustomBlockingObeyed()
         {
-            var processor = new QueueProcessor();
+            var processor = CreateProcessor();
             processor.Start();
 
             // Start up the first task that won't complete until we're sure both tasks started
@@ -286,7 +296,7 @@ namespace Queuete.Tests
         [Test]
         public async Task CustomStopReasonPreventsCancel()
         {
-            var processor = new QueueProcessor();
+            var processor = CreateProcessor();
             processor.Start();
 
             var stopReason = new QueueStopReason("Custom", (_, __) => false);
@@ -311,6 +321,45 @@ namespace Queuete.Tests
             await stop;
 
             Assert.IsTrue(didItem1Finish);
+        }
+
+        [Test]
+        public async Task MultipleDependenciesSatisfiedBeforeDependentRuns()
+        {
+            var processor = CreateProcessor();
+            processor.Start();
+
+            var dependency1CompletionSource = new TaskCompletionSource<object>();
+            var dependency1 = new QueueItem(testItemType, async _ =>
+            {
+                await dependency1CompletionSource.Task;
+            });
+            processor.Enqueue(dependency1);
+
+            var dependency2CompletionSource = new TaskCompletionSource<object>();
+            var dependency2 = new QueueItem(testItemType, async _ =>
+            {
+                await dependency2CompletionSource.Task;
+            });
+            processor.Enqueue(dependency2);
+
+            var didDependentFinish = false;
+            var dependent = processor.EnqueueDependent(new[] { dependency1, dependency2 }, testItemType, async _ =>
+            {
+                didDependentFinish = true;
+            });
+
+            await processor.WaitForWaiting();
+            Assert.AreEqual(QueueItemState.Blocked, dependent.State);
+
+            dependency1CompletionSource.SetResult(null);
+            await processor.WaitForWaiting();
+            Assert.AreEqual(QueueItemState.Blocked, dependent.State);
+
+            dependency2CompletionSource.SetResult(null);
+            await processor.WaitForIdle();
+
+            Assert.IsTrue(didDependentFinish);
         }
     }
 }

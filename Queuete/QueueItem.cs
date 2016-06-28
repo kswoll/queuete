@@ -19,10 +19,10 @@ namespace Queuete
         internal QueueProcessor processor;
         internal ItemQueue queue;
 
-        private readonly object locker = new object();
         private readonly QueueAction action;
 
-        private QueueItemState state = QueueItemState.Pending;
+        private int state = (int)QueueItemState.Pending;
+        private int isInitialized;
 
         /// <summary>
         /// When this item completes, these dependents will be enqueued in their original order.
@@ -42,36 +42,41 @@ namespace Queuete
             Type = type;
         }
 
+        internal void InitializeItem(QueueProcessor processor, ItemQueue queue)
+        {
+            if (Interlocked.CompareExchange(ref isInitialized, 1, 0) == 0)
+            {
+                this.processor = processor;
+                this.queue = queue;
+            }
+        }
+
         internal void EnqueueDependent(QueueItem dependent)
         {
-            lock (locker)
-            {
-                dependents = dependents.Enqueue(dependent);
-            }
+            processor.Dispatch(_ => dependents = dependents.Enqueue(dependent));
         }
 
         internal void AddDependency(QueueItem dependency)
         {
-            lock (locker)
-            {
-                dependencies = dependencies.Add(dependency);
-            }
+            processor.Dispatch(_ => dependencies = dependencies.Add(dependency));
         }
 
         public QueueItemState State
         {
             get
             {
-                return state;
+                return (QueueItemState)state;
             }
             set
             {
-                var intState = (int)state;
                 var intValue = (int)value;
-                var changed = Interlocked.CompareExchange(ref intState, intValue, intValue) != intValue;
-                if (changed)
+                var changed = Interlocked.CompareExchange(ref state, intValue, state) != intValue;
+                var stateChanged = StateChanged;
+                if (changed && stateChanged != null)
                 {
-                    StateChanged?.Invoke(this, value);
+                    // Important, we never want to run this on the current thread.  In particular, if the current thread
+                    // is the processor thread, all hell can break loose in terms of timing.
+                    Task.Run(() => StateChanged?.Invoke(this, value));
                 }
             }
         }
@@ -96,27 +101,26 @@ namespace Queuete
             else
             {
                 State = QueueItemState.Finished;
-                QueueItem[] dependents;
-                lock (locker)
+                TaskCompletionSource<object> completionSource = new TaskCompletionSource<object>();
+                processor.Dispatch(_ =>
                 {
-                    dependents = this.dependents.ToArray();
+                    QueueItem[] dependents = this.dependents.ToArray();
                     this.dependents = ImmutableQueue<QueueItem>.Empty;
-                }
 
-                foreach (var dependent in dependents)
-                {
-                    lock (dependent.locker)
+                    foreach (var dependent in dependents)
                     {
                         // This item is complete, so any item that has a dependency on it should have that dependency removed
                         dependent.dependencies = dependent.dependencies.Remove(this);
 
-                        // Only process the item if is free of any dependencies
+                        // Only process the item if it is free of any dependencies
                         if (!dependent.dependencies.Any())
                         {
                             processor.Enqueue(dependent);
                         }
                     }
-                }
+                    completionSource.SetResult(null);
+                });
+                await completionSource.Task;
             }
         }
     }
