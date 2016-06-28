@@ -228,7 +228,7 @@ namespace Queuete
                     }
                     else
                     {
-                        queue.MarkPending();
+                        queue.MarkWaiting();
                     }
                 }
                 if (!wasItemDequeued && !dispatches.Any())

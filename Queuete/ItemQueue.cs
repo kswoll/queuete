@@ -66,7 +66,7 @@ namespace Queuete
             activeItems = activeItems.Remove(item);
         }
 
-        public void MarkPending()
+        public void MarkWaiting()
         {
             foreach (var item in queue)
                 item.State = QueueItemState.Waiting;
